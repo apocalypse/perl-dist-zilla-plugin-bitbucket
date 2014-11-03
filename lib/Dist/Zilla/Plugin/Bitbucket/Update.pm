@@ -30,6 +30,7 @@ sub after_release {
 	# construct the HTTP request!
 	my $http = HTTP::Tiny->new;
 	$headers->{'authorization'} = "Basic " . MIME::Base64::encode_base64("$login:$pass", '');
+	$headers->{'content-type'} = "application/json";
 
 	# We use the v1.0 API to update
 	my $url = 'https://bitbucket.org/api/1.0/repositories/' . $login . '/' . $repo_name; # TODO encode the repo_name and login?
