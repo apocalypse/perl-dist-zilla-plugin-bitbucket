@@ -58,17 +58,19 @@ sub metadata {
 
 	my $repo_name = $self->_get_repo_name;
 	return {} if (!$repo_name);
+	$repo_name =~ /\/(.*)$/;
+	my $repo_name_only = $1;
 
 	my ($login, undef)  = $self->_get_credentials(1);
 	return if (!$login);
 
 	# Build the meta structure
-	my $html_url = 'https://bitbucket.org/' . $login . '/' . $repo_name;
+	my $html_url = 'https://bitbucket.org/' . $repo_name;
 	my $meta = {
 		'resources' => {
-			'respository' => {
+			'repository' => {
 				'web' => $html_url,
-				'url' => ( $self->scm eq 'git' ? 'git@bitbucket.org:' . $login . '/' . $repo_name . '.git' : $html_url ),
+				'url' => ( $self->scm eq 'git' ? 'git://git@bitbucket.org:' . $login . '/' . $repo_name_only . '.git' : $html_url ),
 				'type' => $self->scm,
 			},
 		},
