@@ -8,6 +8,7 @@ use HTTP::Tiny 0.050;
 use Try::Tiny 0.22;
 use MIME::Base64 3.14;
 use JSON::MaybeXS 1.002006 qw( encode_json decode_json );
+use File::pushd 1.009;
 
 extends 'Dist::Zilla::Plugin::Bitbucket';
 with 'Dist::Zilla::Role::AfterMint';
@@ -23,7 +24,7 @@ create a private repository (default is false).
 has 'is_private' => (
 	is => 'ro',
 	isa => 'Bool',
-	default => 1
+	default => 0
 );
 
 =attr prompt
@@ -126,8 +127,7 @@ sub after_mint {
 	# set the repo settings
 	my ($params, $headers);
 	$params->{'name'} = $repo_name;
-	$params->{'scm'} = $self->scm;
-	$params->{'is_private'} = $self->is_private ? 'true' : 'false';
+	$params->{'is_private'} = 'true' if $self->is_private;
 	$params->{'description'} = $self->description if $self->description;
 	$params->{'fork_policy'} = $self->fork_policy;
 	$params->{'language'} = $self->language if $self->language;
@@ -138,10 +138,17 @@ sub after_mint {
 	$params->{'has_wiki'} = $self->has_wiki ? 'true' : 'false';
 	$self->log_debug([ 'Wiki is %s', $params -> {'has_wiki'} ? 'enabled' : 'disabled' ]);
 
+	{
+		# we are in a completely different path and as such the auto-detection logic won't work!
+		my $p = pushd( $root );
+		$params->{'scm'} = $self->scm;
+	}
+
 	# construct the HTTP request!
 	my $http = HTTP::Tiny->new;
 	my ($login, $pass)  = $self->_get_credentials(0);
 	$headers->{'authorization'} = "Basic " . MIME::Base64::encode_base64("$login:$pass", '');
+	$headers->{'content-type'} = "application/json";
 
 	# We use the v2.0 API to create
 	my $url = 'https://api.bitbucket.org/2.0/repositories/' . $login . '/' . $repo_name; # TODO encode the repo_name and login?
