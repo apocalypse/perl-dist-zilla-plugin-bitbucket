@@ -8,6 +8,7 @@ use HTTP::Tiny 0.050;
 use Try::Tiny 0.22;
 use MIME::Base64 3.14;
 use JSON::MaybeXS 1.002006 qw( encode_json decode_json );
+use Git::Wrapper 0.037;
 use File::pushd 1.009;
 
 extends 'Dist::Zilla::Plugin::Bitbucket';
@@ -182,7 +183,7 @@ sub after_mint {
 			my $git = Git::Wrapper->new($root);
 
 			$self->log_debug([ "Setting Bitbucket remote '%s'", $self->remote ]);
-			# git remote add bitbucket git@bitbucket.org:Apocal/perl-dist-zilla-pluginbundle-apocalyptic.git
+
 			$git->remote("add", $self->remote, 'git@bitbucket.org:' . $login . '/' . $repo_name . '.git');
 
 			my ($branch) = try { $git->rev_parse( { abbrev_ref => 1, symbolic_full_name => 1 }, 'HEAD' ) };
@@ -202,6 +203,8 @@ sub after_mint {
 	} else {
 		# TODO hg doesn't seem to have the same equivalent as git remote - we have to push!
 		my $cmd = 'hg push ssh://hg@bitbucket.org/' . $login . '/' . $repo_name;
+
+		# TODO we need a Hg::Wrapper! :)
 		`$cmd`;
 	}
 }
