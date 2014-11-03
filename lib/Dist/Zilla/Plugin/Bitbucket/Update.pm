@@ -2,10 +2,10 @@ package Dist::Zilla::Plugin::Bitbucket::Update;
 
 # ABSTRACT: Update a Bitbucket repo's info on release
 
-use JSON::MaybeXS 1.002006 qw( encode_json decode_json );
+use Moose;
 use HTTP::Tiny 0.050;
 use MIME::Base64 3.14;
-use Moose;
+use JSON::MaybeXS 1.002006 qw( encode_json decode_json );
 
 extends 'Dist::Zilla::Plugin::Bitbucket';
 with 'Dist::Zilla::Role::AfterRelease';

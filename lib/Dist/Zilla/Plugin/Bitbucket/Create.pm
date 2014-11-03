@@ -2,12 +2,12 @@ package Dist::Zilla::Plugin::Bitbucket::Create;
 
 # ABSTRACT: Create a new Bitbucket repo on dzil new
 
-use JSON::MaybeXS qw( encode_json decode_json );
 use Moose;
-use Moose::Util::TypeConstraints 1.01;
+use Moose::Util::TypeConstraints;
 use HTTP::Tiny 0.050;
 use Try::Tiny 0.22;
 use MIME::Base64 3.14;
+use JSON::MaybeXS 1.002006 qw( encode_json decode_json );
 
 extends 'Dist::Zilla::Plugin::Bitbucket';
 with 'Dist::Zilla::Role::AfterMint';

@@ -3,7 +3,8 @@ package Dist::Zilla::Plugin::Bitbucket;
 # ABSTRACT: Plugins to integrate Dist::Zilla with Bitbucket
 
 use Moose 2.1400;
-use Class::Load 0.22 qw(try_load_class);
+use Moose::Util::TypeConstraints 1.01;
+use Config::Identity::Bitbucket;
 
 =attr remote
 
@@ -64,7 +65,7 @@ sub _get_credentials {
 
 	my ($login, $pass);
 
-	my %identity = Config::Identity::Bitbucket->load if try_load_class('Config::Identity::Bitbucket');
+	my %identity = Config::Identity::Bitbucket->load;
 
 	if (%identity) {
 		$login = $identity{'login'};
@@ -152,7 +153,7 @@ sub _get_repo_name {
 			die "Unable to determine repository name as .hg/hgrc is nonexistent";
 		}
 	}
-
+	$self->log_debug([ "Determined the repo name for Bitbucket is %s", $repo ]);
 	return $repo;
 }
 
