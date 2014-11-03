@@ -2,15 +2,12 @@ package Dist::Zilla::Plugin::Bitbucket;
 
 # ABSTRACT: Plugins to integrate Dist::Zilla with Bitbucket
 
-use Moose;
-use Git::Wrapper;
-use Class::Load qw(try_load_class);
+use Moose 2.1400;
+use Class::Load 0.22 qw(try_load_class);
 
 =attr remote
 
-Specifies the git remote name to be added (default 'origin'). This will point to
-the newly created GitHub repository's private URL. See L</"ADDING REMOTE"> for
-more info.
+Specifies the git/hg remote name to use (default 'origin').
 
 =cut
 
@@ -22,7 +19,7 @@ has 'remote' => (
 
 =attr repo
 
-Specifies the name of the GitHub repository to be created (by default the name
+Specifies the name of the Bitbucket repository to be created (by default the name
 of the dist is used). This can be a template, so something like the following
 will work:
 
@@ -35,10 +32,31 @@ has 'repo' => (
 	isa => 'Maybe[Str]'
 );
 
-has 'api'  => (
+=attr scm
+
+Specifies the source code management system to use.
+
+The possible choices are hg and git. It will be autodetected from the
+distribution root directory if not provided.
+
+=cut
+
+has 'scm' => (
 	is => 'ro',
-	isa => 'Str',
-	default => 'https://api.bitbucket.org/2.0/'
+	isa => enum( [ qw( hg git ) ] ),
+	lazy => 1,
+	default => sub {
+		my $self = shift;
+
+		# Does git exist?
+		if ( -d '.git' ) {
+			return 'git';
+		} elsif ( -d '.hg' ) {
+			return 'hg';
+		} else {
+			die "Unknown local repository type!";
+		}
+	},
 );
 
 sub _get_credentials {
@@ -46,19 +64,23 @@ sub _get_credentials {
 
 	my ($login, $pass);
 
-	my %identity = Config::Identity::Bitbucket -> load
-		if try_load_class('Config::Identity::Bitbucket');
+	my %identity = Config::Identity::Bitbucket->load if try_load_class('Config::Identity::Bitbucket');
 
 	if (%identity) {
 		$login = $identity{'login'};
 	} else {
-		$login = `git config bitbucket.user`;  chomp $login;
+		if ( $self->scm eq 'git' ) {
+			$login = `git config bitbucket.user`;
+		} else {
+			$login = `hg showconfig bitbucket.user`;
+		}
+		chomp $login;
 	}
 
 	if (!$login) {
 		my $error = %identity ?
 			"Err: missing value 'user' in ~/.bitbucket" :
-			"Err: Missing value 'bitbucket.user' in git config";
+			"Err: Missing value 'bitbucket.user' in git/hg config";
 
 		$self->log($error);
 		return;
@@ -68,7 +90,12 @@ sub _get_credentials {
 		if (%identity) {
 			$pass  = $identity{'password'};
 		} else {
-			$pass  = `git config bitbucket.password`; chomp $pass;
+			if ( $self->scm eq 'git' ) {
+				$pass  = `git config bitbucket.password`;
+			} else {
+				$pass  = `hg showconfig bitbucket.password`;
+			}
+			chomp $pass;
 		}
 
 		if (!$pass) {
@@ -83,22 +110,47 @@ sub _get_repo_name {
 	my ($self, $login) = @_;
 
 	my $repo;
-	my $git = Git::Wrapper->new('./');
+	if ( $self->scm eq 'git' ) {
+		require Git::Wrapper;
+		my $git = Git::Wrapper->new('./');
 
-	$repo = $self->repo if $self->repo;
+		$repo = $self->repo if $self->repo;
 
-	my ($url) = map /Fetch URL: (.*)/,
-		$git -> remote('show', '-n', $self -> remote);
+		my ($url) = map { /Fetch URL: (.*)/ } $git->remote('show', '-n', $self->remote);
 
-	$url =~ /bitbucket\.org.*?[:\/](.*)\.git$/;
-	$repo = $1 unless $repo and not $1;
+		$url =~ /bitbucket\.org.*?[:\/](.*)\.git$/;
+		$repo = $1 unless $repo and not $1;
 
-	$repo = $self->zilla->name unless $repo;
+		$repo = $self->zilla->name unless $repo;
 
-	if ($repo !~ /.*\/.*/) {
-		($login, undef) = $self -> _get_credentials(1);
+		if ($repo !~ /.*\/.*/) {
+			($login, undef) = $self->_get_credentials(1);
 
-		$repo = "$login/$repo";
+			$repo = "$login/$repo";
+		}
+	} else {
+		# Get it from .hgrc
+		if ( -f '.hg/hgrc' ) {
+			require File::Slurp::Tiny;
+			my $hgrc = File::Slurp::Tiny::read_file( '.hg/hgrc' );
+
+			# TODO this regex sucks.
+			# apoc@box:~/test-hg$ cat .hg/hgrc
+			#[paths]
+			#default = ssh://hg@bitbucket.org/Apocal/test-hg
+			if ( $hgrc =~ /default\s*=\s*(\S+)/ ) {
+				$repo = $1;
+				if ( $repo =~ /bitbucket\.org\/\S+\/(.+)$/ ) {
+					$repo = $1;
+				} else {
+					die "Unable to extract Bitbucket repo from hg: $repo";
+				}
+			} else {
+				die "Unable to parse repo from hg: $hgrc";
+			}
+		} else {
+			die "Unable to determine repository name as .hg/hgrc is nonexistent";
+		}
 	}
 
 	return $repo;

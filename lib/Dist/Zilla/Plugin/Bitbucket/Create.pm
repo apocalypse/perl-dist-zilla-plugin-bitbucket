@@ -2,28 +2,16 @@ package Dist::Zilla::Plugin::Bitbucket::Create;
 
 # ABSTRACT: Create a new Bitbucket repo on dzil new
 
-use JSON::MaybeXS qw( encode_json );
+use JSON::MaybeXS qw( encode_json decode_json );
 use Moose;
 use Moose::Util::TypeConstraints 1.01;
-use Try::Tiny;
-use MIME::Base64;
+use HTTP::Tiny 0.050;
+use Try::Tiny 0.22;
+use MIME::Base64 3.14;
 
 extends 'Dist::Zilla::Plugin::Bitbucket';
 with 'Dist::Zilla::Role::AfterMint';
 with 'Dist::Zilla::Role::TextTemplate';
-
-=attr scm
-
-Specifies the source code management system to use.
-The possible choices are hg (default) and git.
-
-=cut
-
-has 'scm' => (
-	is => 'ro',
-	isa => enum( [ qw( hg git ) ] ),
-	default => 'hg',
-);
 
 =attr is_private
 
@@ -79,6 +67,8 @@ has 'has_wiki' => (
 
 Provide a string describing the repository. Defaults to nothing.
 
+NOTE: If you are also using the L<Dist::Zilla::Plugin::Bitbucket::Update> plugin watch out for it clobbering your description on release!
+
 =cut
 
 has 'description' => (
@@ -133,9 +123,8 @@ sub after_mint {
 		$repo_name = $self->zilla->name;
 	}
 
-	my ($params, $headers, $content);
-
 	# set the repo settings
+	my ($params, $headers);
 	$params->{'name'} = $repo_name;
 	$params->{'scm'} = $self->scm;
 	$params->{'is_private'} = $self->is_private ? 'true' : 'false';
@@ -153,12 +142,15 @@ sub after_mint {
 	my $http = HTTP::Tiny->new;
 	my ($login, $pass)  = $self->_get_credentials(0);
 	$headers->{'authorization'} = "Basic " . MIME::Base64::encode_base64("$login:$pass", '');
-	my $url = $self->api . 'repositories/' . $login . '/' . $repo_name; # TODO encode the repo_name and login?
+
+	# We use the v2.0 API to create
+	my $url = 'https://api.bitbucket.org/2.0/repositories/' . $login . '/' . $repo_name; # TODO encode the repo_name and login?
 	$self->log([ "Creating new Bitbucket repository '%s'", $repo_name ]);
 	my $response = $http->request( 'POST', $url, {
-		content => encode_json( $content ),
+		content => encode_json( $params ),
 		headers => $headers
 	});
+
 	if ( ! $response->{'success'} ) {
 		$self->log( ["Error: HTTP status(%s) when trying to POST => %s", $response->{'status'}, $response->{'reason'} ] );
 		return;
@@ -167,6 +159,10 @@ sub after_mint {
 	my $r = decode_json( $response->{'content'} );
 	if ( ! $r ) {
 		$self->log( "ERROR: Malformed response content when trying to POST" );
+		return;
+	}
+	if ( exists $r->{'error'} ) {
+		$self->log( [ "Unable to create new Bitbucket repository: %s", $r->{'error'} ] );
 		return;
 	}
 
@@ -197,7 +193,9 @@ sub after_mint {
 			}
 		}
 	} else {
-		# TODO add hg support!
+		# TODO hg doesn't seem to have the same equivalent as git remote - we have to push!
+		my $cmd = 'hg push ssh://hg@bitbucket.org/' . $login . '/' . $repo_name;
+		`$cmd`;
 	}
 }
 
@@ -273,5 +271,11 @@ only when the C<push.default> Git configuration option is set to either
 C<upstream> or C<simple> (which will be the default in Git 2.0). If you are
 using an older Git or don't want to change your config, you may want to have a
 look at L<Dist::Zilla::Plugin::Git::PushInitial>.
+
+=head2 Mercurial usage
+
+This author admits to being a newbie to Mercurial (hg) and haven't tested it thoroughly! In theory this
+plugin should play nice with the L<Dist::Zilla::Plugin::Mercurial> dist so please let me know if you encounter
+issues!
 
 =cut
