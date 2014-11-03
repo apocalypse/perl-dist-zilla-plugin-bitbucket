@@ -1,63 +1,222 @@
 package Dist::Zilla::Plugin::Bitbucket::Create;
 
-use JSON;
+# ABSTRACT: Create a new Bitbucket repo on dzil new
+
+use JSON::MaybeXS qw( encode_json );
 use Moose;
+use Moose::Util::TypeConstraints 1.01;
 use Try::Tiny;
-use Git::Wrapper;
-use File::Basename;
+use MIME::Base64;
 
 extends 'Dist::Zilla::Plugin::Bitbucket';
-
 with 'Dist::Zilla::Role::AfterMint';
 with 'Dist::Zilla::Role::TextTemplate';
 
-has 'org' => (
-	is      => 'ro',
-	isa     => 'Maybe[Str]'
+=attr scm
+
+Specifies the source code management system to use.
+The possible choices are hg (default) and git.
+
+=cut
+
+has 'scm' => (
+	is => 'ro',
+	isa => enum( [ qw( hg git ) ] ),
+	default => 'hg',
 );
 
-has 'public' => (
-	is      => 'ro',
-	isa     => 'Bool',
+=attr is_private
+
+Create a private repository if this option is set to true, otherwise
+create a private repository (default is false).
+
+=cut
+
+has 'is_private' => (
+	is => 'ro',
+	isa => 'Bool',
 	default => 1
 );
 
+=attr prompt
+
+Prompt for confirmation before creating a Bitbucket repository if this option is
+set to true (default is false).
+
+=cut
+
 has 'prompt' => (
-	is      => 'ro',
-	isa     => 'Bool',
+	is => 'ro',
+	isa => 'Bool',
 	default => 0
 );
 
+=attr has_issues
+
+Enable issues for the new repository if this option is set to true (default).
+
+=cut
+
 has 'has_issues' => (
-	is      => 'ro',
-	isa     => 'Bool',
+	is => 'ro',
+	isa => 'Bool',
 	default => 1
 );
 
+=attr has_wiki
+
+Enable the wiki for the new repository if this option is set to true (default).
+
+=cut
+
 has 'has_wiki' => (
-	is      => 'ro',
-	isa     => 'Bool',
+	is => 'ro',
+	isa => 'Bool',
 	default => 1
 );
+
+=attr description
+
+Provide a string describing the repository. Defaults to nothing.
+
+=cut
+
+has 'description' => (
+	is => 'ro',
+	isa => 'Maybe[Str]',
+);
+
+=attr fork_policy
+
+Control the rules for forking this repository. Available values are (the default is allow_forks):
+
+	allow_forks: unrestricted forking
+	no_public_forks: restrict forking to private forks (forks cannot be made public later)
+	no_forks: deny all forking
+
+=cut
+
+has 'fork_policy' => (
+	is => 'ro',
+	isa => enum( [ qw( allow_forks no_public_forks no_forks ) ] ),
+	default => 'allow_forks',
+);
+
+=attr language
+
+The programming language used in the repository. Defaults to nothing.
+
+NOTE: Must be a valid (lowercase) item as shown in the drop-down list on the repository's admin page on the Bitbucket website.
+
+=cut
+
+has 'language' => (
+	is => 'ro',
+	isa => 'Maybe[Str]',
+);
+
+sub after_mint {
+	my $self   = shift;
+	my ($opts) = @_;
+
+	return if $self->prompt and not $self->_confirm;
+
+	my $root = $opts->{'mint_root'};
+
+	my $repo_name;
+
+	if ($opts->{'repo'}) {
+		$repo_name = $opts->{'repo'};
+	} elsif ($self->repo) {
+		$repo_name = $self->fill_in_string( $self->repo, { dist => \($self->zilla) }, );
+	} else {
+		$repo_name = $self->zilla->name;
+	}
+
+	my ($params, $headers, $content);
+
+	# set the repo settings
+	$params->{'name'} = $repo_name;
+	$params->{'scm'} = $self->scm;
+	$params->{'is_private'} = $self->is_private ? 'true' : 'false';
+	$params->{'description'} = $self->description if $self->description;
+	$params->{'fork_policy'} = $self->fork_policy;
+	$params->{'language'} = $self->language if $self->language;
+
+	$params->{'has_issues'} = $self->has_issues ? 'true' : 'false';
+	$self->log_debug([ 'Issues are %s', $params -> {'has_issues'} ? 'enabled' : 'disabled' ]);
+
+	$params->{'has_wiki'} = $self->has_wiki ? 'true' : 'false';
+	$self->log_debug([ 'Wiki is %s', $params -> {'has_wiki'} ? 'enabled' : 'disabled' ]);
+
+	# construct the HTTP request!
+	my $http = HTTP::Tiny->new;
+	my ($login, $pass)  = $self->_get_credentials(0);
+	$headers->{'authorization'} = "Basic " . MIME::Base64::encode_base64("$login:$pass", '');
+	my $url = $self->api . 'repositories/' . $login . '/' . $repo_name; # TODO encode the repo_name and login?
+	$self->log([ "Creating new Bitbucket repository '%s'", $repo_name ]);
+	my $response = $http->request( 'POST', $url, {
+		content => encode_json( $content ),
+		headers => $headers
+	});
+	if ( ! $response->{'success'} ) {
+		$self->log( ["Error: HTTP status(%s) when trying to POST => %s", $response->{'status'}, $response->{'reason'} ] );
+		return;
+	}
+
+	my $r = decode_json( $response->{'content'} );
+	if ( ! $r ) {
+		$self->log( "ERROR: Malformed response content when trying to POST" );
+		return;
+	}
+
+	# Now, we add the remote!
+	if ( $self->scm eq 'git' ) {
+		my $git_dir = "$root/.git";
+		my $rem_ref = $git_dir . "/refs/remotes/" . $self->remote;
+
+		if ((-d $git_dir) && (not -d $rem_ref)) {
+			my $git = Git::Wrapper->new($root);
+
+			$self->log_debug([ "Setting Bitbucket remote '%s'", $self->remote ]);
+			# git remote add bitbucket git@bitbucket.org:Apocal/perl-dist-zilla-pluginbundle-apocalyptic.git
+			$git->remote("add", $self->remote, 'git@bitbucket.org:' . $login . '/' . $repo_name . '.git');
+
+			my ($branch) = try { $git->rev_parse( { abbrev_ref => 1, symbolic_full_name => 1 }, 'HEAD' ) };
+
+			if ($branch) {
+				try {
+					$git->config("branch.$branch.merge");
+					$git->config("branch.$branch.remote");
+				} catch {
+					$self->log_debug([ "Setting up remote tracking for branch '%s'", $branch ]);
+
+					$git->config("branch.$branch.merge", "refs/heads/$branch");
+					$git->config("branch.$branch.remote", $self->remote);
+				};
+			}
+		}
+	} else {
+		# TODO add hg support!
+	}
+}
+
+sub _confirm {
+	my ($self) = @_;
+
+	my $prompt = "Shall I create a Bitbucket repository for " . $self->zilla->name . "?";
+	return $self->zilla->chrome->prompt_yn($prompt, {default => 1} );
+}
+
+no Moose;
+__PACKAGE__ -> meta -> make_immutable;
+1;
+
+=pod
 
 =head1 SYNOPSIS
 
-Configure git with your Bitbucket credentials:
-
-	$ git config --global bitbucket.user LoginName
-	$ git config --global bitbucket.password MySecretPassword
-
-Alternatively you can install L<Config::Identity> and write your credentials
-in the (optionally GPG-encrypted) C<~/.bitbucket> file as follows:
-
-	login LoginName
-	password MySecretPassword
-
-(if only the login name is set, the password will be asked interactively)
-
-then, in your F<profile.ini>:
-
-	# default config
+	# in your profile.ini in the MintingProvider's profile
 	[Bitbucket::Create]
 
 	# to override publicness
@@ -65,7 +224,7 @@ then, in your F<profile.ini>:
 	public = 0
 
 	# use a template for the repository name
-	[GitHub::Create]
+	[Bitbucket::Create]
 	repo = {{ lc $dist -> name }}
 
 See L</ATTRIBUTES> for more options.
@@ -78,203 +237,33 @@ a new distribution is created with C<dzil new>.
 It will also add a new git remote pointing to the newly created Bitbucket
 repository's private URL. See L</"ADDING REMOTE"> for more info.
 
-=cut
-
-sub after_mint {
-	my $self   = shift;
-	my ($opts) = @_;
-
-	return if $self -> prompt and not $self -> _confirm;
-
-	my $root = $opts -> {'mint_root'};
-
-	my $repo_name;
-
-	if ($opts -> {'repo'}) {
-		$repo_name = $opts -> {'repo'};
-	} elsif ($self -> repo) {
-		$repo_name = $self -> fill_in_string(
-			$self -> repo, { dist => \($self->zilla) },
-		);
-	} else {
-		$repo_name = $self -> zilla -> name;
-	}
-
-	my ($login, $pass, $otp)  = $self -> _get_credentials(0);
-
-	my $http = HTTP::Tiny -> new;
-
-	$self -> log([ "Creating new GitHub repository '%s'", $repo_name ]);
-
-	my ($params, $headers, $content);
-
-	$params -> {'name'}   = $repo_name;
-	$params -> {'public'} = $self -> public;
-	$params -> {'description'} = $opts -> {'descr'} if $opts -> {'descr'};
-
-	$params -> {'has_issues'} = $self -> has_issues;
-	$self -> log([ 'Issues are %s', $params -> {'has_issues'} ?
-				'enabled' : 'disabled' ]);
-
-	$params -> {'has_wiki'} = $self -> has_wiki;
-	$self -> log([ 'Wiki is %s', $params -> {'has_wiki'} ?
-				'enabled' : 'disabled' ]);
-
-	$params -> {'has_downloads'} = $self -> has_downloads;
-	$self -> log([ 'Downloads are %s', $params -> {'has_downloads'} ?
-				'enabled' : 'disabled' ]);
-
-	my $url = $self -> api;
-	$url .= $self -> org ? '/orgs/' . $self -> org . '/' : '/user/';
-	$url .= 'repos';
-
-	if ($pass) {
-		require MIME::Base64;
-
-		my $basic = MIME::Base64::encode_base64("$login:$pass", '');
-		$headers -> {'authorization'} = "Basic $basic";
-	}
-
-	if ($self -> prompt_2fa) {
-		$headers -> { 'X-GitHub-OTP' } = $otp;
-		$self -> log([ "Using two-factor authentication" ]);
-	}
-
-	$content = to_json $params;
-
-	my $response = $http -> request('POST', $url, {
-		content => $content,
-		headers => $headers
-	});
-
-	my $repo = $self -> _check_response($response);
-
-	if ($repo eq 'redo') {
-		$self -> log("Retrying with two-factor authentication");
-		$self -> prompt_2fa(1);
-		$repo = $self -> after_mint($opts);
-	}
-
-	return if not $repo;
-
-	my $git_dir = "$root/.git";
-	my $rem_ref = $git_dir."/refs/remotes/".$self -> remote;
-
-	if ((-d $git_dir) && (not -d $rem_ref)) {
-		my $git = Git::Wrapper -> new($root);
-
-		$self -> log([ "Setting GitHub remote '%s'", $self -> remote ]);
-		$git -> remote("add", $self -> remote, $repo -> {'ssh_url'});
-
-		my ($branch) = try { $git -> rev_parse(
-			{ abbrev_ref => 1, symbolic_full_name => 1 }, 'HEAD'
-		) };
-
-		if ($branch) {
-			try {
-				$git -> config("branch.$branch.merge");
-				$git -> config("branch.$branch.remote");
-			} catch {
-				$self -> log([ "Setting up remote tracking for branch '%s'", $branch ]);
-
-				$git -> config("branch.$branch.merge", "refs/heads/$branch");
-				$git -> config("branch.$branch.remote", $self -> remote);
-			};
-		}
-	}
-}
-
-sub _confirm {
-	my ($self) = @_;
-
-	my $dist = $self -> zilla -> name;
-	my $prompt = "Shall I create a GitHub repository for $dist?";
-
-	return $self -> zilla -> chrome -> prompt_yn($prompt, {default => 1} );
-}
-
-no Moose;
-__PACKAGE__ -> meta -> make_immutable;
-1;
-
-=pod
-
-=head1 ATTRIBUTES
-
-=over
-
-=item C<repo>
-
-Specifies the name of the GitHub repository to be created (by default the name
-of the dist is used). This can be a template, so something like the following
-will work:
-
-    repo = {{ lc $dist -> name }}
-
-=item C<org>
-
-Specifies the name of a GitHub organization in which to create the repository
-(by default the repository is created in the user's account).
-
-=item C<prompt>
-
-Prompt for confirmation before creating a GitHub repository if this option is
-set to true (default is false).
-
-=item C<public>
-
-Create a public repository if this option is set to true (default), otherwise
-create a private repository.
-
-=item C<remote>
-
-Specifies the git remote name to be added (default 'origin'). This will point to
-the newly created GitHub repository's private URL. See L</"ADDING REMOTE"> for
-more info.
-
-=item C<has_issues>
-
-Enable issues for the new repository if this option is set to true (default).
-
-=item C<has_wiki>
-
-Enable the wiki for the new repository if this option is set to true (default).
-
-=item C<has_downloads>
-
-Enable downloads for the new repository if this option is set to true (default).
-
-=item C<prompt_2fa>
-
-Prompt for GitHub two-factor authentication code if this option is set to true
-(default is false). If this option is set to false but GitHub requires 2fa for
-the login, it'll be automatically enabled.
-
-=back
+Furthermore, please consult the Bitbucket API reference at
+L<https://confluence.atlassian.com/display/BITBUCKET/repository+Resource#repositoryResource-POSTanewrepository>
+for an in-depth explanation of the various settings.
 
 =head1 ADDING REMOTE
 
-By default C<GitHub::Create> adds a new git remote pointing to the newly created
-GitHub repository's private URL B<if, and only if,> a git repository has already
+By default C<Bitbucket::Create> adds a new git remote pointing to the newly created
+Bitbucket repository's private URL B<if, and only if,> a git repository has already
 been initialized, and if the remote doesn't already exist in that repository.
 
-To take full advantage of this feature you should use, along with C<GitHub::Create>,
+To take full advantage of this feature you should use, along with C<Bitbucket::Create>,
 the L<Dist::Zilla::Plugin::Git::Init> plugin, leaving blank its C<remote> option,
 as follows:
 
-    [Git::Init]
-    ; here goes your Git::Init config, remember
-    ; to not set the 'remote' option
-    [GitHub::Create]
+	[Git::Init]
+	; here goes your Git::Init config, remember
+	; to not set the 'remote' option
+	[Bitbucket::Create]
 
 You may set your preferred remote name, by setting the C<remote> option of the
-C<GitHub::Create> plugin, as follows:
+C<Bitbucket::Create> plugin, as follows:
 
-    [Git::Init]
-    [GitHub::Create]
-    remote = myremote
+	[Git::Init]
+	[Bitbucket::Create]
+	remote = myremote
 
-Remember to put C<[Git::Init]> B<before> C<[GitHub::Create]>.
+Remember to put C<[Git::Init]> B<before> C<[Bitbucket::Create]>.
 
 After the new remote is added, the current branch will track it, unless remote
 tracking for the branch was already set. This may allow one to use the
@@ -286,7 +275,3 @@ using an older Git or don't want to change your config, you may want to have a
 look at L<Dist::Zilla::Plugin::Git::PushInitial>.
 
 =cut
-
-no Moose;
-__PACKAGE__ -> meta -> make_immutable;
-1;
