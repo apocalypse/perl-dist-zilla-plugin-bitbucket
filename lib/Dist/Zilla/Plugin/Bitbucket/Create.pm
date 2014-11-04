@@ -25,7 +25,7 @@ create a private repository (default is false).
 has 'is_private' => (
 	is => 'ro',
 	isa => 'Bool',
-	default => 0
+	default => 0,
 );
 
 =attr prompt
@@ -38,7 +38,7 @@ set to true (default is false).
 has 'prompt' => (
 	is => 'ro',
 	isa => 'Bool',
-	default => 0
+	default => 0,
 );
 
 =attr has_issues
@@ -50,7 +50,7 @@ Enable issues for the new repository if this option is set to true (default).
 has 'has_issues' => (
 	is => 'ro',
 	isa => 'Bool',
-	default => 1
+	default => 1,
 );
 
 =attr has_wiki
@@ -62,7 +62,7 @@ Enable the wiki for the new repository if this option is set to true (default).
 has 'has_wiki' => (
 	is => 'ro',
 	isa => 'Bool',
-	default => 1
+	default => 1,
 );
 
 =attr description
@@ -142,6 +142,7 @@ sub after_mint {
 	{
 		# we are in a completely different path and as such the auto-detection logic won't work!
 		my $p = pushd( $root );
+		$p = $p; # shutup UsedVars warning
 		$params->{'scm'} = $self->scm;
 	}
 
@@ -205,7 +206,7 @@ sub after_mint {
 		my $cmd = 'hg push ssh://hg@bitbucket.org/' . $login . '/' . $repo_name;
 
 		# TODO we need a Hg::Wrapper! :)
-		`$cmd`;
+		`$cmd`; ## no critic (InputOutput::ProhibitBacktickOperators)
 	}
 }
 
@@ -222,7 +223,9 @@ __PACKAGE__->meta->make_immutable;
 
 =pod
 
-=head1 SYNOPSIS
+=for Pod::Coverage after_mint
+
+=head1 DESCRIPTION
 
 	# in your profile.ini in the MintingProvider's profile
 	[Bitbucket::Create]
@@ -234,10 +237,6 @@ __PACKAGE__->meta->make_immutable;
 	# use a template for the repository name
 	[Bitbucket::Create]
 	repo = {{ lc $dist -> name }}
-
-See L</ATTRIBUTES> for more options.
-
-=head1 DESCRIPTION
 
 This L<Dist::Zilla> plugin creates a new git repository on L<Bitbucket|https://bitbucket.org> when
 a new distribution is created with C<dzil new>.

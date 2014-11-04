@@ -17,7 +17,7 @@ root if this option is set to true (default).
 has 'homepage' => (
 	is      => 'ro',
 	isa     => 'Bool',
-	default => 1
+	default => 1,
 );
 
 =attr bugs
@@ -33,7 +33,7 @@ Bitbucket admin page!
 has 'bugs' => (
 	is      => 'ro',
 	isa     => 'Bool',
-	default => 1
+	default => 1,
 );
 
 =attr wiki
@@ -49,28 +49,30 @@ Bitbucket admin page!
 has 'wiki' => (
 	is      => 'ro',
 	isa     => 'Bool',
-	default => 0
+	default => 0,
 );
 
 sub metadata {
-	my $self    = shift;
-	my ($opts)  = @_;
+	my $self = shift;
 
 	my $repo_name = $self->_get_repo_name;
 	return {} if (!$repo_name);
-	$repo_name =~ /\/(.*)$/;
-	my $repo_name_only = $1;
+	if($repo_name =~ /\/(.*)$/) {
+		$repo_name = $1;
+	} else {
+		die "unknown repo name";
+	}
 
-	my ($login, undef)  = $self->_get_credentials(1);
+	my ($login, undef) = $self->_get_credentials(1);
 	return if (!$login);
 
 	# Build the meta structure
-	my $html_url = 'https://bitbucket.org/' . $repo_name;
+	my $html_url = 'https://bitbucket.org/' . $login . '/' . $repo_name;
 	my $meta = {
 		'resources' => {
 			'repository' => {
 				'web' => $html_url,
-				'url' => ( $self->scm eq 'git' ? 'git://git@bitbucket.org:' . $login . '/' . $repo_name_only . '.git' : $html_url ),
+				'url' => ( $self->scm eq 'git' ? 'git://git@bitbucket.org:' . $login . '/' . $repo_name . '.git' : $html_url ),
 				'type' => $self->scm,
 			},
 		},
@@ -95,18 +97,20 @@ no Moose;
 __PACKAGE__ -> meta -> make_immutable;
 1;
 
-=head1 SYNOPSIS
+=pod
+
+=for Pod::Coverage metadata
+
+=head1 DESCRIPTION
 
 	# in dist.ini
 	[Bitbucket::Meta]
-
-=head1 DESCRIPTION
 
 This L<Dist::Zilla> plugin adds some information about the distribution's Bitbucket
 repository to the META.{yml,json} files, using the official L<CPAN::Meta>
 specification.
 
-L<Bitbucket::Meta> currently sets the following fields:
+This module currently sets the following fields:
 
 =over 4
 

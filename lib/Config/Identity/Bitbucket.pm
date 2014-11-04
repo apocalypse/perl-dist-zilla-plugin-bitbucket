@@ -31,6 +31,8 @@ sub load_check {
 
 =pod
 
+=for Pod::Coverage STUB check load load_check
+
 =head1 SYNOPSIS
 
 	use Config::Identity::Bitbucket;

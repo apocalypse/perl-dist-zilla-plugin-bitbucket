@@ -15,7 +15,7 @@ Specifies the git/hg remote name to use (default 'origin').
 has 'remote' => (
 	is => 'ro',
 	isa => 'Maybe[Str]',
-	default => 'origin'
+	default => 'origin',
 );
 
 =attr repo
@@ -30,7 +30,7 @@ will work:
 
 has 'repo' => (
 	is => 'ro',
-	isa => 'Maybe[Str]'
+	isa => 'Maybe[Str]',
 );
 
 =attr scm
@@ -62,7 +62,7 @@ has 'scm' => (
 
 sub _get_credentials {
 	my ($self, $nopass) = @_;
-
+## no critic (InputOutput::ProhibitBacktickOperators)
 	my ($login, $pass);
 
 	my %identity = Config::Identity::Bitbucket->load;
@@ -112,21 +112,23 @@ sub _get_repo_name {
 
 	my $repo;
 	if ( $self->scm eq 'git' ) {
-		require Git::Wrapper;
-		my $git = Git::Wrapper->new('./');
+		if ($self->repo) {
+			$repo = $self->repo;
+		} else {
+			require Git::Wrapper;
+			my $git = Git::Wrapper->new('./');
+			my ($url) = map { /Fetch URL: (.*)/ } $git->remote('show', '-n', $self->remote);
 
-		$repo = $self->repo if $self->repo;
+			if ($url =~ /bitbucket\.org.*?[:\/](.*)\.git$/) {
+				$repo = $1;
+			} else {
+				$repo = $self->zilla->name;
+			}
+		}
 
-		my ($url) = map { /Fetch URL: (.*)/ } $git->remote('show', '-n', $self->remote);
-
-		$url =~ /bitbucket\.org.*?[:\/](.*)\.git$/;
-		$repo = $1 unless $repo and not $1;
-
-		$repo = $self->zilla->name unless $repo;
-
+		# Make sure we return full path including user
 		if ($repo !~ /.*\/.*/) {
 			($login, undef) = $self->_get_credentials(1);
-
 			$repo = "$login/$repo";
 		}
 	} else {
@@ -141,7 +143,7 @@ sub _get_repo_name {
 			#default = ssh://hg@bitbucket.org/Apocal/test-hg
 			if ( $hgrc =~ /default\s*=\s*(\S+)/ ) {
 				$repo = $1;
-				if ( $repo =~ /bitbucket\.org\/\S+\/(.+)$/ ) {
+				if ( $repo =~ /bitbucket\.org\/(.+)$/ ) {
 					$repo = $1;
 				} else {
 					die "Unable to extract Bitbucket repo from hg: $repo";
@@ -163,15 +165,6 @@ __PACKAGE__ -> meta -> make_immutable;
 
 =pod
 
-=head1 SYNOPSIS
-
-	# in plugin.ini
-	[Bitbucket::Create]
-
-	# in dist.ini
-	[Bitbucket::Update]
-	[Bitbucket::Meta]
-
 =head1 DESCRIPTION
 
 This is a set of plugins for L<Dist::Zilla> intended
@@ -179,15 +172,13 @@ to more easily integrate L<Bitbucket|https://bitbucket.org> in the C<dzil> workf
 
 The following is the list of the plugins shipped in this distribution:
 
-=over 4
-
-=item * L<Dist::Zilla::Plugin::Bitbucket::Create> Create Bitbucket repo on dzil new
-
-=item * L<Dist::Zilla::Plugin::Bitbucket::Update> Update Bitbucket repo info on release
-
-=item * L<Dist::Zilla::Plugin::Bitbucket::Meta> Add Bitbucket repo info to META.{yml,json}
-
-=back
+=for :list
+* L<Dist::Zilla::Plugin::Bitbucket::Create>
+Create Bitbucket repo on dzil new
+* L<Dist::Zilla::Plugin::Bitbucket::Update>
+Update Bitbucket repo info on release
+* L<Dist::Zilla::Plugin::Bitbucket::Meta>
+Add Bitbucket repo info to META.{yml,json}
 
 =head2 Configuration
 
