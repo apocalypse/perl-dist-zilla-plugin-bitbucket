@@ -25,7 +25,7 @@ sub after_release {
 	# set the repo settings
 	my ($params, $headers);
 	$params->{'description'} = $self->zilla->abstract;
-	$params->{'website'} = $self->zilla->distmeta->{'resources'}->{'homepage'};
+	$params->{'website'} = $self->zilla->distmeta->{'resources'}{'homepage'};
 
 	# construct the HTTP request!
 	my $http = HTTP::Tiny->new;
@@ -57,7 +57,7 @@ sub after_release {
 }
 
 no Moose;
-__PACKAGE__ -> meta -> make_immutable;
+__PACKAGE__->meta->make_immutable;
 1;
 
 =head1 SYNOPSIS
