@@ -62,10 +62,12 @@ has 'scm' => (
 
 sub _get_credentials {
 	my ($self, $nopass) = @_;
-## no critic (InputOutput::ProhibitBacktickOperators)
-	my ($login, $pass);
+
+	# TODO I'm so lazy...
+	## no critic (InputOutput::ProhibitBacktickOperators)
 
 	my %identity = Config::Identity::Bitbucket->load;
+	my ($login, $pass);
 
 	if (%identity) {
 		$login = $identity{'login'};
