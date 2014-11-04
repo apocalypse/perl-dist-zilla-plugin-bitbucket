@@ -1,5 +1,7 @@
 package Config::Identity::Bitbucket;
 
+# ABSTRACT: Manages the login and password for Bitbucket.org
+
 # ROKR++ I copied this from Config::Identity::GitHub
 use Config::Identity 0.0018;
 use Carp qw( croak );
